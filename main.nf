@@ -12,7 +12,8 @@ include {fastp_trim_reads} from "./modules/fastp"
 include {bwa_index; bwa_alignment} from "./modules/bwa"
 include {gatk_Mark_Duplicates; gatk_base_recalibrator; gatk_applyBQSR; alignment_metrics; insert_size_metrics} from "./modules/gatk_preprocessing"
 include {samtools_faidx; gatk_sequenceDictionary} from "./modules/index_files"
-include {gatk_mutect2; gatk_mutect2_tumor_normal; gatk_getpileupsummaries; gatk_calculatecontamination; gatk_orientationbias; gatk_filtermutectcalls; gatk_funcotator_datasource_downloader; gatk_funcotator; DOWNLOAD_SNPEFF_DB; SNPEFF_ANNOTATE } from "./modules/gatk_variant_call"
+include {gatk_mutect2; gatk_mutect2_tumor_normal; gatk_getpileupsummaries; gatk_calculatecontamination; gatk_orientationbias; gatk_filtermutectcalls; normalization; extract_filtered_variants} from "./modules/gatk_variant_call"
+include {gatk_select_variants_SNPs; gatk_select_variants_INDELs; gatk_funcotator; DOWNLOAD_SNPEFF_DB; SNPEFF_ANNOTATE } from "./modules/variant_Annotation"
 
 workflow {
     is_csv = params.input
@@ -37,7 +38,7 @@ workflow {
             if (row.type) meta.type = row.type
             tuple(meta, file(row.Read_1), file(row.Read_2))
         }
-        csv_ch.view()
+        //csv_ch.view()
        
         preproc_out = preprocessing(csv_ch)
         variant_calling(preproc_out, has_normal)
@@ -150,9 +151,20 @@ workflow variant_calling {
 
         filtered_ch = vcf_ch.join(orientation_bias_out).join(contamination_out)
         filtered_out = gatk_filtermutectcalls(filtered_ch)
-        //gatk_funcotator(filtered_out).view()
+        norm_vcf = normalization(gatk_filtermutectcalls.out)
+        norm_vcf.view()
+        
+        //snp_indel_ch = gatk_select_variants_SNPs.out.mix(gatk_select_variants_INDELs.out)
+        //snp_indel_ch.view()
+        extracted_filtered_ch = extract_filtered_variants(norm_vcf)
+        //extracted_filtered_ch.view()
+        
         DOWNLOAD_SNPEFF_DB()
-        SNPEFF_ANNOTATE(filtered_out,DOWNLOAD_SNPEFF_DB.out.snpeff_db_path)
+        SNPEFF_ANNOTATE(extracted_filtered_ch)
+        SNPEFF_ANNOTATE.out.ann_vcf.view()
+
+        gatk_select_variants_SNPs(SNPEFF_ANNOTATE.out.ann_vcf)
+        gatk_select_variants_INDELs(SNPEFF_ANNOTATE.out.ann_vcf)
 
     emit:
         annotated_variants = SNPEFF_ANNOTATE.out.ann_vcf
